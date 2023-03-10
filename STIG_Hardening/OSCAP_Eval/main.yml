@@ -1,0 +1,64 @@
+- hosts: all
+  become: yes
+  become_method: sudo
+  become_user: root
+  gather_facts: yes
+
+  vars:
+    oscap_profile: xccdf_org.ssgproject.content_profile_stig
+    oscap_policy: ssg-rhel7-ds-1.2
+
+  tasks:
+  - name: Update/Install oscap and latest SCAP guides
+    package:
+      name: "{{ item }}"
+      state: latest
+    with_items:
+    - openscap-scanner
+    - scap-security-guide
+    tags:
+    - oscap_config
+
+  - name: Transfer CentOS configured SCAP file
+    copy:
+      src: "./files/centos7_scap-1.2.xml"
+      dest: "/usr/share/xml/scap/ssg/content/{{ oscap_profile }}.xml"
+      force: true
+    tags:
+    - oscap_config
+
+  - name: running oscap eval
+    shell:
+      cmd: "oscap xccdf eval --profile {{ oscap_profile }} --results /tmp/results-{{ inventory_hostname }}-stig-oscap.xml --report /tmp/report-{{ inventory_hostname }}-stig-oscap}.html --fetch-remote-resources /usr/share/xml/scap/ssg/content/{{ oscap_policy }}.xml"
+    ignore_errors: true
+    tags:
+    - oscap_eval
+
+  - name: download report
+    fetch:
+      src: "/tmp/report-{{ inventory_hostname }}-stig-oscap}.html"
+      dest: "../oscap-reports/report-{{ inventory_hostname }}-stig-oscap.html"
+      flat: yes
+    tags:
+    - oscap_eval
+
+  - name: download results
+    fetch:
+      src: "/tmp/results-{{ inventory_hostname }}-stig-oscap.xml"
+      dest: "../oscap-reports/results-{{ inventory_hostname }}-stig-oscap.xml"
+      flat: yes
+    tags:
+    - oscap_eval
+    
+- name: generate remediation
+  hosts: 127.0.0.1
+  connection: local
+  vars:
+    oscap_profile: xccdf_org.ssgproject.content_profile_stig
+    oscap_policy: ssg-rhel7-ds-1.2
+  tasks:
+  - name: Generate remediation with oscap
+    shell:
+      cmd: "oscap xccdf generate fix --fix-type ansible --output ../stig_remediations/playbook-{{ inventory_hostname }}-stig-oscap.yml --profile {{ oscap_profile }} ../oscap-reports/results-10.0.1.157-stig-oscap.xml"
+  tags:
+  - oscap_rem
